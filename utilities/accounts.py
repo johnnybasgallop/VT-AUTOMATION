@@ -3,15 +3,21 @@ import asyncio
 
 async def get_account_balances(page, target_currency: str) -> list[dict]:
     """
-    Scrapes account numbers, balances, and currencies.
+    Scrapes account numbers, balances, currencies, and platform type (MT4/MT5).
 
     Args:
         page: Playwright Page object
         target_currency (str): e.g. 'GBP', 'USD'
 
     Returns:
-        List of dicts: [
-            {'account_number': 123456789, 'value': 0.00, 'currency': 'GBP'},
+        List of dicts:
+        [
+            {
+                'account_number': 123456789,
+                'value': 0.00,
+                'currency': 'GBP',
+                'platform': 'MT5'
+            },
             ...
         ]
     """
@@ -30,8 +36,7 @@ async def get_account_balances(page, target_currency: str) -> list[dict]:
             continue
 
         try:
-            # 1) extract balance
-            #    take the line immediately before the currency label
+            # 1) extract balance line before the currency label
             value_text = (
                 content
                 .split(target_currency)[0]
@@ -41,32 +46,32 @@ async def get_account_balances(page, target_currency: str) -> list[dict]:
             )
             value = float(value_text.replace(",", "").replace("–", "0"))
 
-            # 2) extract account number
-            platform_tag_el = await card.query_selector('.platform_tag')
-            if not platform_tag_el:
+            # 2) extract platform (MT4/MT5)
+            platform_el = await card.query_selector('.platform_tag')
+            if not platform_el:
                 continue
-            account_number_el = await platform_tag_el.evaluate_handle(
+            platform = (await platform_el.inner_text()).strip()
+
+            # 3) extract account number (the next sibling of .platform_tag)
+            account_number_handle = await platform_el.evaluate_handle(
                 'el => el.nextElementSibling'
             )
-            account_number_text = await account_number_el.inner_text()
+            account_number_text = await account_number_handle.inner_text()
             account_number = int(account_number_text.strip())
 
-            # 3) extract currency label from the card itself, if possible
+            # 4) extract currency label from the card itself, if present
             currency_el = await card.query_selector('.center_currency')
-            if currency_el:
-                currency = (await currency_el.inner_text()).strip()
-            else:
-                currency = target_currency
+            currency = (await currency_el.inner_text()).strip() if currency_el else target_currency
 
-            # 4) append to results
+            # 5) append to results
             results.append({
                 "account_number": account_number,
                 "value": value,
-                "currency": currency
+                "currency": currency,
+                "platform": platform
             })
 
         except Exception as e:
-            # you might decide to log to a file instead
             print(f"Skipping a card due to error: {e}")
 
     return results
